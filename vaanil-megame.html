@@ -98,6 +98,9 @@ body{
 .play-ctrl:hover{background:rgba(255,255,255,0.18)!important;transform:scale(1.05)!important;}
 .play-ctrl:active{transform:scale(0.94)!important;}
 .play-ctrl svg{width:22px;height:22px;}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.spinner{width:22px;height:22px;border:2px solid rgba(255,255,255,0.2);border-top-color:rgba(255,255,255,0.9);border-radius:50%;animation:spin 0.8s linear infinite;display:none;}
+.net-error{display:none;font-size:11px;color:rgba(255,120,80,0.85);text-align:center;margin-bottom:12px;font-family:'Cormorant Garamond',serif;font-style:italic;}
 .vol-row{display:flex;align-items:center;gap:10px;margin-bottom:28px;opacity:0.5;}
 .vol-row svg{width:14px;height:14px;flex-shrink:0;color:rgba(255,255,255,0.6);}
 .vol-input{flex:1;height:2px;-webkit-appearance:none;background:rgba(255,255,255,0.15);border-radius:2px;cursor:pointer;outline:none;}
@@ -179,11 +182,13 @@ body{
       </button>
       <button class="ctrl play-ctrl" id="playBtn" aria-label="Play">
         <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+        <div class="spinner" id="spinner"></div>
       </button>
       <button class="ctrl" id="skipFwd" aria-label="Skip 10 seconds">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-.49-4.95"/></svg>
       </button>
     </div>
+    <div class="net-error" id="netError">Please check your internet connection.</div>
     <div class="vol-row">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/></svg>
       <input type="range" class="vol-input" id="volInput" min="0" max="100" value="85" step="1" aria-label="Volume"/>
@@ -208,7 +213,7 @@ body{
   </div>
 </div>
 
-<audio id="audioEl" preload="none">
+<audio id="audioEl" preload="auto">
   <source src="https://www.dropbox.com/scl/fi/e1srqgkytv5p3t4tqavl0/Vaanil-Megame-Vinisha-Master.wav?rlkey=o6egfqp9uainmzlxohc3x2hvf&st=bcmwvp4m&raw=1" type="audio/wav"/>
 </audio>
 
@@ -216,11 +221,13 @@ body{
 const audio = document.getElementById('audioEl');
 const playBtn = document.getElementById('playBtn');
 const playIcon = document.getElementById('playIcon');
+const spinner = document.getElementById('spinner');
 const seekInput = document.getElementById('seekInput');
 const trackFill = document.getElementById('trackFill');
 const curTime = document.getElementById('curTime');
 const durTime = document.getElementById('durTime');
 const volInput = document.getElementById('volInput');
+const netError = document.getElementById('netError');
 
 const PLAY = '<polygon points="5 3 19 12 5 21 5 3"/>';
 const PAUSE = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
@@ -231,20 +238,73 @@ function fmt(s) {
   return Math.floor(s / 60) + ':' + (s % 60 < 10 ? '0' : '') + (s % 60);
 }
 
+function showSpinner() {
+  playIcon.style.display = 'none';
+  spinner.style.display = 'block';
+}
+
+function showPlay() {
+  spinner.style.display = 'none';
+  playIcon.style.display = 'block';
+  playIcon.innerHTML = PLAY;
+}
+
+function showPause() {
+  spinner.style.display = 'none';
+  playIcon.style.display = 'block';
+  playIcon.innerHTML = PAUSE;
+}
+
 audio.volume = 0.85;
 
-playBtn.addEventListener('click', async () => {
+// Autoplay on first click anywhere on page
+let autoplayDone = false;
+document.addEventListener('click', () => {
+  if (!autoplayDone) {
+    autoplayDone = true;
+    showSpinner();
+    audio.play().then(() => {
+      showPause();
+      netError.style.display = 'none';
+    }).catch(() => {
+      showPlay();
+    });
+  }
+}, { once: true });
+
+// Play/pause button
+playBtn.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  autoplayDone = true;
   if (audio.paused) {
+    showSpinner();
     try {
       await audio.play();
-      playIcon.innerHTML = PAUSE;
-    } catch(e) {
-      console.error('Playback error:', e);
+      showPause();
+      netError.style.display = 'none';
+    } catch(err) {
+      showPlay();
+      netError.style.display = 'block';
     }
   } else {
     audio.pause();
-    playIcon.innerHTML = PLAY;
+    showPlay();
   }
+});
+
+// Buffering - show spinner when waiting
+audio.addEventListener('waiting', () => { showSpinner(); });
+audio.addEventListener('stalled', () => {
+  showSpinner();
+  netError.style.display = 'block';
+});
+audio.addEventListener('playing', () => {
+  showPause();
+  netError.style.display = 'none';
+});
+audio.addEventListener('error', () => {
+  showPlay();
+  netError.style.display = 'block';
 });
 
 audio.addEventListener('timeupdate', () => {
@@ -257,7 +317,7 @@ audio.addEventListener('timeupdate', () => {
 
 audio.addEventListener('loadedmetadata', () => { durTime.textContent = fmt(audio.duration); });
 audio.addEventListener('ended', () => {
-  playIcon.innerHTML = PLAY;
+  showPlay();
   seekInput.value = 0;
   trackFill.style.width = '0%';
   curTime.textContent = '0:00';
@@ -270,8 +330,8 @@ seekInput.addEventListener('input', () => {
 });
 
 volInput.addEventListener('input', () => { audio.volume = volInput.value / 100; });
-document.getElementById('skipBack').addEventListener('click', () => { audio.currentTime = Math.max(0, audio.currentTime - 10); });
-document.getElementById('skipFwd').addEventListener('click', () => { audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10); });
+document.getElementById('skipBack').addEventListener('click', (e) => { e.stopPropagation(); audio.currentTime = Math.max(0, audio.currentTime - 10); });
+document.getElementById('skipFwd').addEventListener('click', (e) => { e.stopPropagation(); audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 10); });
 </script>
 </body>
 </html>
